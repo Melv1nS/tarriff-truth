@@ -6,21 +6,37 @@ const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN!,
 });
 
-// Trading Economics category mapping
-const TE_CATEGORY_MAPPING: Record<string, string> = {
-  'Groceries & Food': 'food-beverage',
-  Transportation: 'transport-equipment',
-  'Housing & Utilities': 'construction-materials',
-  Healthcare: 'medical-pharmaceutical',
-  Entertainment: 'recreation-culture',
-  Clothing: 'textiles-clothing',
-  Electronics: 'electronics-computers',
-  'Other Goods': 'consumer-goods',
+// Consolidated unique indicators
+const CORE_INDICATORS = {
+  PRICE_INDICES: [
+    'Core Inflation Rate',
+    'Consumer Price Index',
+    'Producer Prices',
+    'Import Prices',
+  ],
+  CONSUMER_METRICS: ['Consumer Spending', 'Retail Sales MoM'],
+  SECTOR_SPECIFIC: {
+    'Groceries & Food': ['Food Inflation', 'Consumer Price Index Food'],
+    Transportation: ['Transportation Costs', 'Gasoline Prices'],
+    'Housing & Utilities': ['Housing Index', 'Construction Costs'],
+    Healthcare: ['Healthcare Spending', 'Government Spending'],
+  },
+} as const;
+
+// Mapping categories to their indicator groups
+const CATEGORY_INDICATOR_GROUPS: Record<string, (keyof typeof CORE_INDICATORS)[]> = {
+  'Groceries & Food': ['PRICE_INDICES', 'SECTOR_SPECIFIC'],
+  Transportation: ['PRICE_INDICES', 'SECTOR_SPECIFIC'],
+  'Housing & Utilities': ['PRICE_INDICES', 'SECTOR_SPECIFIC'],
+  Healthcare: ['PRICE_INDICES', 'SECTOR_SPECIFIC'],
+  Entertainment: ['PRICE_INDICES', 'CONSUMER_METRICS'],
+  Clothing: ['PRICE_INDICES', 'CONSUMER_METRICS'],
+  Electronics: ['PRICE_INDICES', 'CONSUMER_METRICS'],
+  'Other Goods': ['PRICE_INDICES', 'CONSUMER_METRICS'],
 };
 
 const COUNTRIES = ['Mexico', 'Canada', 'China'] as const;
 const CACHE_DURATION = 1000 * 60 * 60 * 24 * 7; // 7 days
-const MIN_TRADE_VOLUME = 100; // million USD
 
 interface TradeItem {
   name: string;
@@ -30,88 +46,124 @@ interface TradeItem {
   lastUpdated: string;
 }
 
-interface TradeDataItem {
-  symbol?: string;
-  category?: string;
-  value?: number;
-  price?: number;
-  volume?: number;
+interface IndicatorData {
+  Country?: string;
+  Category?: string;
+  Value?: number;
+  LastUpdate?: string;
 }
 
-async function fetchTradeData(country: string, category: string): Promise<TradeDataItem[]> {
-  const teCategory = TE_CATEGORY_MAPPING[category];
-  if (!teCategory) return [];
+// Get all unique indicators for a country
+function getUniqueIndicators(): string[] {
+  const uniqueIndicators = new Set<string>();
 
+  // Add core indicators
+  Object.values(CORE_INDICATORS).forEach((group) => {
+    if (Array.isArray(group)) {
+      group.forEach((indicator) => uniqueIndicators.add(indicator));
+    } else {
+      Object.values(group)
+        .flat()
+        .forEach((indicator) => uniqueIndicators.add(indicator));
+    }
+  });
+
+  return Array.from(uniqueIndicators);
+}
+
+async function fetchIndicatorData(country: string): Promise<IndicatorData[]> {
   try {
-    // Fetch both imports and trade balance data
-    const [importsResponse, tradeResponse] = await Promise.all([
-      fetch(`https://api.tradingeconomics.com/country/${country}/imports/${teCategory}`, {
-        headers: { Authorization: `Client ${process.env.TRADING_ECONOMICS_API_KEY}` },
-      }),
-      fetch(`https://api.tradingeconomics.com/country/${country}/trade/${teCategory}`, {
-        headers: { Authorization: `Client ${process.env.TRADING_ECONOMICS_API_KEY}` },
-      }),
-    ]);
+    const indicators = getUniqueIndicators();
+    console.log(`Fetching ${indicators.length} indicators for ${country}`);
 
-    const imports = importsResponse.ok ? await importsResponse.json() : [];
-    const trade = tradeResponse.ok ? await tradeResponse.json() : [];
-
-    return [...imports, ...trade].filter(
-      (item) => item && item.volume && item.volume > MIN_TRADE_VOLUME
+    const response = await fetch(
+      `https://api.tradingeconomics.com/country/${encodeURIComponent(country.toLowerCase())}?c=${process.env.TRADING_ECONOMICS_API_KEY}&indicators=${indicators.join(',')}`
     );
+
+    if (!response.ok) {
+      console.error(`Error fetching data for ${country}:`, response.statusText);
+      return [];
+    }
+
+    const data = await response.json();
+    return Array.isArray(data) ? data : [];
   } catch (error) {
-    console.error(`Error fetching trade data for ${country}/${category}:`, error);
+    console.error(`Error fetching indicator data for ${country}:`, error);
     return [];
   }
 }
 
-function calculateImportShare(data: TradeDataItem[]): number {
-  const totalTrade = data.reduce((sum, item) => sum + (item.volume || 0), 0);
-  const imports = data
-    .filter((item) => item.value !== undefined && item.value < 0)
-    .reduce((sum, item) => sum + (item.volume || 0), 0);
+// Get relevant indicators for a category
+function getCategoryIndicators(category: string, allData: IndicatorData[]): IndicatorData[] {
+  const relevantGroups = CATEGORY_INDICATOR_GROUPS[category];
+  if (!relevantGroups) return [];
 
-  return totalTrade > 0 ? imports / totalTrade : 0;
+  const relevantIndicators = new Set<string>();
+
+  // Add indicators from relevant groups
+  relevantGroups.forEach((group) => {
+    const indicators = CORE_INDICATORS[group];
+    if (Array.isArray(indicators)) {
+      indicators.forEach((indicator: string) => relevantIndicators.add(indicator));
+    } else if (group === 'SECTOR_SPECIFIC' && category in CORE_INDICATORS.SECTOR_SPECIFIC) {
+      (
+        CORE_INDICATORS.SECTOR_SPECIFIC[category as keyof typeof CORE_INDICATORS.SECTOR_SPECIFIC] ||
+        []
+      ).forEach((indicator: string) => relevantIndicators.add(indicator));
+    }
+  });
+
+  return allData.filter((item) => item.Category && relevantIndicators.has(item.Category));
 }
 
 export async function updateTradeData() {
   console.log('Starting trade data update...');
 
   for (const country of COUNTRIES) {
-    for (const category of AVAILABLE_CATEGORIES) {
-      const cacheKey = `representative_items:${country}:${category}`;
-      console.log(`Fetching data for ${country}/${category}...`);
+    try {
+      // Fetch all indicators for the country in one call
+      const countryData = await fetchIndicatorData(country);
 
-      try {
-        const tradeData = await fetchTradeData(country, category);
+      // Process each category using the fetched data
+      for (const category of AVAILABLE_CATEGORIES) {
+        const cacheKey = `representative_items:${country}:${category}`;
+        console.log(`Processing ${country}/${category}...`);
 
-        if (tradeData.length > 0) {
-          // Sort by volume and take top 3
-          const significantItems = tradeData
-            .sort((a, b) => (b.volume || 0) - (a.volume || 0))
-            .slice(0, 3);
+        try {
+          const categoryData = getCategoryIndicators(category, countryData);
 
-          const items: TradeItem[] = significantItems.map((item) => ({
-            name: item.symbol || item.category || 'Unknown Item',
-            basePrice: Math.abs(item.value || item.price || 0),
-            importShare: calculateImportShare(tradeData.filter((d) => d.symbol === item.symbol)),
-            explanation: `$${((item.volume || 0) / 1000000).toFixed(1)}B annual trade volume`,
-            lastUpdated: new Date().toISOString(),
-          }));
+          if (categoryData.length > 0) {
+            const items: TradeItem[] = categoryData
+              .filter((item) => item.Value !== undefined)
+              .slice(0, 3)
+              .map((item) => ({
+                name: item.Category || category,
+                basePrice: Math.abs(item.Value || 0),
+                importShare: 0.5,
+                explanation: `Based on ${item.Category || 'economic'} indicators`,
+                lastUpdated: item.LastUpdate || new Date().toISOString(),
+              }));
 
-          const cacheData = {
-            items,
-            timestamp: Date.now(),
-          };
+            if (items.length > 0) {
+              const cacheData = {
+                items,
+                timestamp: Date.now(),
+              };
 
-          await redis.set(cacheKey, JSON.stringify(cacheData), { ex: CACHE_DURATION / 1000 });
-          console.log(`Updated ${country}/${category} with ${items.length} items`);
-        } else {
-          console.log(`No trade data found for ${country}/${category}`);
+              await redis.set(cacheKey, JSON.stringify(cacheData), { ex: CACHE_DURATION / 1000 });
+              console.log(`Updated ${country}/${category} with ${items.length} items`);
+            } else {
+              console.log(`No valid items found for ${country}/${category}`);
+            }
+          } else {
+            console.log(`No data found for ${country}/${category}`);
+          }
+        } catch (error) {
+          console.error(`Error processing ${country}/${category}:`, error);
         }
-      } catch (error) {
-        console.error(`Error updating ${country}/${category}:`, error);
       }
+    } catch (error) {
+      console.error(`Error processing country ${country}:`, error);
     }
   }
 

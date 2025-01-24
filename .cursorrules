@@ -38,7 +38,7 @@ Every time you choose to apply a rule(s), explicitly state the rule(s) in the ou
 
 ## Tech Stack
 Frontend : Next.js 14 (App Router)
-Styling: Tailwind CSS + DaisyUI
+Styling: Tailwind CSS
 Charts: Victory.js
 Data Fetching: Trading Economics API
 AI Analysis: FinGPT (HuggingFace)
@@ -63,6 +63,7 @@ Create new file at: src/app/utils/dateFormatter.ts
 
 ## NextJS Usage
 - Include "use client" for all client side component suggestions
+- Only keep one version of config files and prefer config files that are .ts
 
 ## TypeScript Usage
 - Use TypeScript for all code; prefer interfaces over types
