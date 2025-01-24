@@ -1,0 +1,15 @@
+#!/bin/sh
+
+# Source nvm if it exists
+[ -s "$HOME/.nvm/nvm.sh" ] && \. "$HOME/.nvm/nvm.sh"
+
+# Add common Node.js installation paths
+export PATH="/usr/local/bin:/usr/local/opt/node/bin:$PATH"
+export PATH="$HOME/.nvm/versions/node/$(nvm current)/bin:$PATH"
+export PATH="$(pwd)/node_modules/.bin:$PATH"
+
+# Run lint-staged for staged files
+npx lint-staged
+
+# Run type checking
+npm run type-check
