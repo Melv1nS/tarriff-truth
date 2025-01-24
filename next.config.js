@@ -2,7 +2,9 @@
 const nextConfig = {
     // Other config options...
     experimental: {
-        serverActions: true
+        serverActions: {
+            allowedOrigins: ['*']
+        }
     },
     async headers() {
         return [

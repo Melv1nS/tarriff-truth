@@ -51,7 +51,7 @@ interface CategoryConfig {
 }
 
 // Add constant for available categories
-const AVAILABLE_CATEGORIES = [
+export const AVAILABLE_CATEGORIES = [
     'Groceries & Food',
     'Transportation',
     'Housing & Utilities',

@@ -30,7 +30,15 @@ interface TradeItem {
     lastUpdated: string;
 }
 
-async function fetchTradeData(country: string, category: string): Promise<any[]> {
+interface TradeDataItem {
+    symbol?: string;
+    category?: string;
+    value?: number;
+    price?: number;
+    volume?: number;
+}
+
+async function fetchTradeData(country: string, category: string): Promise<TradeDataItem[]> {
     const teCategory = TE_CATEGORY_MAPPING[category];
     if (!teCategory) return [];
 
@@ -61,10 +69,10 @@ async function fetchTradeData(country: string, category: string): Promise<any[]>
     }
 }
 
-function calculateImportShare(data: any[]): number {
+function calculateImportShare(data: TradeDataItem[]): number {
     const totalTrade = data.reduce((sum, item) => sum + (item.volume || 0), 0);
     const imports = data
-        .filter(item => item.value < 0)
+        .filter(item => item.value !== undefined && item.value < 0)
         .reduce((sum, item) => sum + (item.volume || 0), 0);
 
     return totalTrade > 0 ? imports / totalTrade : 0;
