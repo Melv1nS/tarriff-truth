@@ -96,7 +96,7 @@ export async function updateTradeData() {
                         .slice(0, 3);
 
                     const items: TradeItem[] = significantItems.map(item => ({
-                        name: item.symbol || item.category,
+                        name: item.symbol || item.category || 'Unknown Item',
                         basePrice: Math.abs(item.value || item.price || 0),
                         importShare: calculateImportShare(tradeData.filter(d => d.symbol === item.symbol)),
                         explanation: `$${(item.volume / 1000000).toFixed(1)}B annual trade volume`,
