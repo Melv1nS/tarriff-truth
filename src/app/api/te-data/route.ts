@@ -273,3 +273,5 @@ function normalizeSubstitutionEffect(elasticity: number): number {
     // Normalize to 0.2-0.8 range
     return Math.max(0.2, Math.min(0.8, elasticity));
 } 
+
+//test comment
